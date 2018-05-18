@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: npm-registry
+objects:
+- apiVersion: v1
+  kind: Route
+  metadata:
+    labels:
+      app: ${app}
+      external-exposed: 'true'
+    name: ${app}
+    namespace: ${project}
+  spec:
+    host: ${hostname}
+    port:
+      targetPort: 4873-tcp
+    tls:
+      insecureEdgeTerminationPolicy: Redirect
+      termination: edge
+    to:
+      kind: Service
+      name: ${app}
+      weight: 100
+    wildcardPolicy: None
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    labels:
+      app: ${app}
+    name: ${app}
+    namespace: ${project}
+  spec:
+    replicas: ${{replicas}}
+    selector:
+      app: ${app}
+      deploymentconfig: ${app}
+    strategy:
+      activeDeadlineSeconds: 21600
+      resources: {}
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          app: ${app}
+          deploymentconfig: ${app}
+      spec:
+        containers:
+        - image: verdaccio/verdaccio
+          name: ${app}
+          ports:
+            - containerPort: 4873
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+            - mountPath: /verdaccio/storage
+              name: "volume-${app}-persistent-storage"
+          imagePullPolicy: Always
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        securityContext:
+          supplementalGroups:
+            - 10000003
+        terminationGracePeriodSeconds: 30
+        volumes:
+          - name: volume-${app}-persistent-storage
+            persistentVolumeClaim:
+              claimName: ${app}-persistent-volume
+    test: false
+- apiVersion: v1
+  kind: Service
+  metadata:
+    labels:
+      app: ${app}
+    name: ${app}
+    namespace: ${project}
+  spec:
+    ports:
+    - name: 4873-tcp
+      port: 4873
+      protocol: TCP
+      targetPort: 4873
+    selector:
+      app: ${app}
+      deploymentconfig: ${app}
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${app}-persistent-volume
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${volume_capacity}
+parameters:
+- description: Project Name
+  name: project
+  required: true
+- description: Application name
+  name: app
+  required: true
+- description: number of replicas
+  name: replicas
+  value: "1"
+  required: false
+- name: volume_capacity
+  required: true
+  value: 1Gi
+- name: hostname
+  required: true
